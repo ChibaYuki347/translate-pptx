@@ -182,8 +182,8 @@ XML の `<a:rPr>` 内で以下の属性を設定する:
   - **[en2ja のみ]** `lang` 属性を `ja-JP` に更新（`en-US`、`en-GB` など英語ロケールをすべて置換）し、東アジアフォント（`<a:ea>`）を **Yu Gothic UI** に変更すること
   - **[ja2en のみ]** `lang` 属性を `en-US` に更新（`ja-JP`、`ja` など日本語ロケールをすべて置換）し、東アジアフォント（`<a:ea>`）を除去のうえ、ラテンフォント（`<a:latin>`）と theme `<a:majorFont>` / `<a:minorFont>` を Segoe UI / Segoe UI Semibold に書き換えること（本文 = Segoe UI、太字・見出し = Segoe UI Semibold）。これにより JA→EN 出力の見出しが PowerPoint 既定の Calibri Light にフォールバックすることを防ぐ
 - **[en2ja のみ]** 常用漢字のみを使用し、中国語の簡体字・繁体字を混入させないこと
-- 作業用のスクリプトや一時ファイルは、ルートフォルダの下に temp フォルダを作成し、その中で作業を実施すること
-- 作業終了後に temp フォルダを削除すること
+- 作業用のスクリプトや一時ファイルは、ルートフォルダ直下の `temp/<jobid>/` フォルダ内で作業を実施してください。`<jobid>` は実行ごとに一意な ID（既定: 入力 PPTX の拡張子なしのファイル名をサニタイズしたもの）とし、複数の翻訳ジョブを同時実行しても作業ディレクトリが衝突しないようにします。
+- 作業終了後に `temp/<jobid>/` を削除してください（`temp/` 自体は他のジョブが利用中の可能性があるため削除しません）。
 
 ## ワークフロー (#tool:todo)
 
@@ -196,6 +196,7 @@ XML の `<a:rPr>` 内で以下の属性を設定する:
 | `source_file` | 翻訳対象の PPTX ファイルパス | （必須） |
 | `direction` | 翻訳方向。`en2ja`（英→日）または `ja2en`（日→英） | `en2ja` |
 | `output_suffix` | 出力ファイル名に付加するサフィックス | `direction=en2ja` のとき `_JA`、`ja2en` のとき `_EN` |
+| `jobid` | この実行で使用する作業ディレクトリ名 (`temp/<jobid>/`) | 入力 PPTX の拡張子なしファイル名（英数 / `-` / `_` 以外を `_` に置換） |
 
 出力ファイル名は、元のファイル名（拡張子を除く）に `output_suffix` を付加し、`.pptx` 拡張子を付ける。
 
@@ -206,31 +207,40 @@ XML の `<a:rPr>` 内で以下の属性を設定する:
 
 `1_unpack_pptx.py --direction <DIR>` 側でも同じガードが実装されている。意図的に再翻訳したい場合は `1_unpack_pptx.py --force-already-translated` を指定する。
 
+**並列実行ルール:** 複数の PPTX を同時に翻訳する場合は、それぞれ別々の `<jobid>` を割り当てること（例: ファイル A は `jobid=deck_a`、ファイル B は `jobid=deck_b`）。`<jobid>` は **半角英数および `-` `_` のみ** で構成し、空白・スラッシュ・記号を含めないこと。
+
 ### 2. 作業用 temp フォルダの作成
 
-ワークフロー中に生成するスクリプト・展開ファイル・中間生成物は、すべてリポジトリ ルートフォルダ直下の `temp/` フォルダ内で扱う。既存の `temp/` が残っていた場合は事前に削除して作り直す:
+ワークフロー中に生成するスクリプト・展開ファイル・中間生成物は、すべて `temp/<jobid>/` 配下で扱う。既存の同名サブディレクトリが残っていた場合は事前に削除して作り直す（`temp/` 自体は他のジョブが利用中の可能性があるため、`temp/<jobid>/` のみを削除する）:
+
+PowerShell:
 
 **Windows / PowerShell:**
 
 ```powershell
-if (Test-Path temp) { Remove-Item temp -Recurse -Force }
-New-Item -ItemType Directory -Path temp | Out-Null
+$JobId = "<jobid>"
+$WorkDir = "temp/$JobId"
+if (Test-Path $WorkDir) { Remove-Item $WorkDir -Recurse -Force }
+New-Item -ItemType Directory -Path $WorkDir -Force | Out-Null
 ```
 
 **Linux / macOS / WSL (bash):**
 
 ```bash
-rm -rf temp && mkdir -p temp
+JOBID="<jobid>"
+WORKDIR="temp/${JOBID}"
+rm -rf "${WORKDIR}"
+mkdir -p "${WORKDIR}"
 ```
 
-以降の手順 (3〜8) における `unpacked/` や `temp/` などの相対パスはすべて `temp/` 配下を指すものとする（例: `temp/unpacked/`、`temp/translate.py`）。出力先 PPTX (`<output_file>`) は `temp/` の外（ユーザー指定の場所）に書き出すこと。
+以降の手順 (3〜8) における `unpacked/` や `translations/` などの相対パスはすべて `temp/<jobid>/` 配下を指すものとする（例: `temp/<jobid>/unpacked/`、`temp/<jobid>/translations/`）。出力先 PPTX (`<output_file>`) は `temp/` の外（ユーザー指定の場所）に書き出すこと。
 
 ### 3. PPTX の展開
 
 `--direction` を必ず指定する（既定は `en2ja`）。`direction=ja2en` のときは `_JA` サフィックスの入力（en2ja の出力）が正規の入力となるため、その場合のみ `_JA` 入力を許可する:
 
 ```bash
-python ".github/agents/scripts/1_unpack_pptx.py" --direction <DIR> "<source_file>" temp/unpacked/
+python ".github/agents/scripts/1_unpack_pptx.py" --direction <DIR> "<source_file>" "temp/${JOBID}/unpacked/"
 ```
 
 ### 4. テキストの一覧化
@@ -238,7 +248,7 @@ python ".github/agents/scripts/1_unpack_pptx.py" --direction <DIR> "<source_file
 事前配置されたスクリプト `.github/agents/scripts/2_extract_texts.py` を使用して、スライド本文 (`ppt/slides/slide*.xml`) およびノート (`ppt/notesSlides/notesSlide*.xml`) の `<a:t>` テキストを抽出する。**`--unique` オプションを必ず指定**し、重複を除いたユニークな原文だけを取得すること（辞書生成のトークン消費を最小化するため）:
 
 ```bash
-python ".github/agents/scripts/2_extract_texts.py" --unique --output temp/unique_texts.txt temp/unpacked/
+python ".github/agents/scripts/2_extract_texts.py" --unique --output "temp/${JOBID}/unique_texts.txt" "temp/${JOBID}/unpacked/"
 ```
 
 **重要（出力先は必ず `--output` で指定すること）:** シェルのリダイレクト `>` は **絶対に使用しない**。PowerShell の `>` は子プロセスの stdout を `[Console]::OutputEncoding`（日本語 Windows では既定で CP932）として再デコードし、UTF-16 LE + BOM でファイルに書き出すため、`–`（EN DASH, UTF-8: `E2 80 93`）等の非 ASCII 約物が `窶・` のような mojibake に化ける。`--output` を使えば Python が直接 UTF-8 でファイルに書き込むためシェルの影響を受けない。
@@ -256,16 +266,16 @@ python ".github/agents/scripts/2_extract_texts.py" --unique --output temp/unique
 
 ### 5. 翻訳辞書の作成
 
-翻訳辞書は **`temp/translations/` ディレクトリ配下に複数の JSON シャードに分割して生成する**。これは単一の巨大 JSON を 1 回の `Create File` で書き出そうとすると LLM の出力トークン上限に達して処理が完了しないことがあるため、必須の対策である。
+翻訳辞書は **`temp/<jobid>/translations/` ディレクトリ配下に複数の JSON シャードに分割して生成する**。これは単一の巨大 JSON を 1 回の `Create File` で書き出そうとすると LLM の出力トークン上限に達して処理が完了しないことがあるため、必須の対策である。
 
 **分割ルール:**
 
-- ディレクトリ: `temp/translations/`
+- ディレクトリ: `temp/<jobid>/translations/`
 - ファイル名: `chunk_001.json`, `chunk_002.json`, ... （ゼロパディング 3 桁、辞書順マージ）
 - 1 シャードあたり **概ね 50〜100 エントリ** を上限とする。原文・訳文が長い場合はさらに少なくする
 - 各シャードは独立した完全な JSON オブジェクト（`{ "原文": "訳文", ... }`）
 
-例 `temp/translations/chunk_001.json`:
+例 `temp/<jobid>/translations/chunk_001.json`:
 
 ```json
 {
@@ -298,7 +308,7 @@ python ".github/agents/scripts/2_extract_texts.py" --unique --output temp/unique
    - **[ja2en]** 全 `<a:ea>` を除去したうえで、ラテンフォント `<a:latin>` を **Segoe UI**（本文・通常テキスト）/ **Segoe UI Semibold**（`b="1"` または既存 typeface に "Bold" / "Semibold" / "Black" / "Heavy" を含む太字／見出し）に書き換える。theme の `<a:majorFont>` の `<a:latin>` は Segoe UI Semibold、`<a:minorFont>` の `<a:latin>` は Segoe UI に書き換える。これにより JA→EN 出力の見出しが PowerPoint 既定の Calibri Light にフォールバックすることを防ぐ
 
 ```bash
-python ".github/agents/scripts/3_apply_translations.py" --direction <DIR> temp/unpacked/ temp/translations/
+python ".github/agents/scripts/3_apply_translations.py" --direction <DIR> "temp/${JOBID}/unpacked/" "temp/${JOBID}/translations/"
 ```
 
 **翻訳後の残存チェック（重要）:**
@@ -323,34 +333,36 @@ python ".github/agents/scripts/3_apply_translations.py" --direction <DIR> temp/u
 **WARNING が出た場合の対応（重要）:**
 
 1. 列挙された原文を確認する（製品名・URL・略語など意図的に英語のまま残しているものは無視可）。
-2. 真に翻訳されるべきものがあれば、`temp/translations/chunk_NNN.json` に対応エントリを追加（または新規シャードを作成）して再度 `3_apply_translations.py` を実行する。
+2. 真に翻訳されるべきものがあれば、`temp/<jobid>/translations/chunk_NNN.json` に対応エントリを追加（または新規シャードを作成）して再度 `3_apply_translations.py` を実行する。
 3. WARNING が解消するか、残存項目がすべて意図的な原文保持であることを確認してから次工程（パッキング）に進む。
 
 ### 7. パッキング
 
 ```bash
-python ".github/agents/scripts/4_pack_pptx.py" temp/unpacked/ "<output_file>"
+python ".github/agents/scripts/4_pack_pptx.py" "temp/${JOBID}/unpacked/" "<output_file>"
 ```
 
-**注意:** 出力先 `<output_file>` は `temp/` の外に指定すること（`temp/` 配下に出力するとクリーンアップ時に削除される）。
+**注意:** 出力先 `<output_file>` は `temp/<jobid>/` の外に指定すること（`temp/<jobid>/` 配下に出力するとクリーンアップ時に削除される）。
 
 ### 8. クリーンアップ
 
-作業用 `temp/` フォルダを丸ごと削除する（展開ファイル、翻訳スクリプト、その他の中間生成物がすべて含まれる）:
+作業用 `temp/<jobid>/` フォルダのみを削除する（展開ファイル、翻訳スクリプト、その他の中間生成物がすべて含まれる）。`temp/` 自体は他のジョブが利用中の可能性があるため削除しないこと:
+
+PowerShell:
 
 **Windows / PowerShell:**
 
 ```powershell
-if (Test-Path temp) { Remove-Item temp -Recurse -Force }
+if (Test-Path "temp/$JobId") { Remove-Item "temp/$JobId" -Recurse -Force }
 ```
 
 **Linux / macOS / WSL (bash):**
 
 ```bash
-rm -rf temp
+rm -rf "temp/${JOBID}"
 ```
 
-エラーで中断した場合も、必ず `temp/` を削除してから終了すること。
+エラーで中断した場合も、必ず `temp/<jobid>/` を削除してから終了すること。
 
 ## 出力
 
