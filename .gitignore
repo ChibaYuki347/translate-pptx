@@ -1,0 +1,10 @@
+/history
+/temp
+
+# Python bytecode cache
+__pycache__/
+*.py[cod]
+
+# pptx フォルダ自体は残し、その中のファイルはすべて無視する
+/pptx/*
+!/pptx/.このフォルダの中に翻訳対象のPPTXファイルを配置
