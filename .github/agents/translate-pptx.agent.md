@@ -149,9 +149,17 @@ XML の `<a:rPr>` 内で以下の属性を設定する:
 
 ワークフロー中に生成するスクリプト・展開ファイル・中間生成物は、すべてリポジトリ ルートフォルダ直下の `temp/` フォルダ内で扱う。既存の `temp/` が残っていた場合は事前に削除して作り直す:
 
+**Windows / PowerShell:**
+
 ```powershell
 if (Test-Path temp) { Remove-Item temp -Recurse -Force }
 New-Item -ItemType Directory -Path temp | Out-Null
+```
+
+**Linux / macOS / WSL (bash):**
+
+```bash
+rm -rf temp && mkdir -p temp
 ```
 
 以降の手順 (3〜8) における `unpacked/` や `temp/` などの相対パスはすべて `temp/` 配下を指すものとする（例: `temp/unpacked/`、`temp/translate.py`）。出力先 PPTX (`<output_file>`) は `temp/` の外（ユーザー指定の場所）に書き出すこと。
@@ -250,8 +258,16 @@ python ".github/agents/scripts/4_pack_pptx.py" temp/unpacked/ "<output_file>"
 
 作業用 `temp/` フォルダを丸ごと削除する（展開ファイル、翻訳スクリプト、その他の中間生成物がすべて含まれる）:
 
+**Windows / PowerShell:**
+
 ```powershell
 if (Test-Path temp) { Remove-Item temp -Recurse -Force }
+```
+
+**Linux / macOS / WSL (bash):**
+
+```bash
+rm -rf temp
 ```
 
 エラーで中断した場合も、必ず `temp/` を削除してから終了すること。

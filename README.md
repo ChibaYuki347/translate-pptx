@@ -4,10 +4,20 @@ PPTX ファイル（PowerPoint プレゼンテーション）を英語から日�
 
 ## 前提条件
 
-- Windows / PowerShell
-- Python 3.x
+- 対応 OS: **Windows / PowerShell**、**Linux**、**macOS**、**WSL2** （いずれも検証済み）
+- Python 3.10 以上
 - VS Code + GitHub Copilot
 - 推奨モデル: `Claude Opus 4.7`
+
+## セットアップ
+
+依存パッケージをインストール:
+
+```bash
+pip install -r requirements.txt
+```
+
+> 必要なパッケージは `defusedxml` のみです。
 
 ## 使い方
 
