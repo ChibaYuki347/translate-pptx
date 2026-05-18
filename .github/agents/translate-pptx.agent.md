@@ -167,8 +167,10 @@ python ".github/agents/scripts/1_unpack_pptx.py" "<source_file>" temp/unpacked/
 事前配置されたスクリプト `.github/agents/scripts/2_extract_texts.py` を使用して、スライド本文 (`ppt/slides/slide*.xml`) およびノート (`ppt/notesSlides/notesSlide*.xml`) の `<a:t>` テキストを抽出する。**`--unique` オプションを必ず指定**し、重複を除いたユニークな原文だけを取得すること（辞書生成のトークン消費を最小化するため）:
 
 ```bash
-python ".github/agents/scripts/2_extract_texts.py" --unique temp/unpacked/ > temp/unique_texts.txt
+python ".github/agents/scripts/2_extract_texts.py" --unique --output temp/unique_texts.txt temp/unpacked/
 ```
+
+**重要（出力先は必ず `--output` で指定すること）:** シェルのリダイレクト `>` は **絶対に使用しない**。PowerShell の `>` は子プロセスの stdout を `[Console]::OutputEncoding`（日本語 Windows では既定で CP932）として再デコードし、UTF-16 LE + BOM でファイルに書き出すため、`–`（EN DASH, UTF-8: `E2 80 93`）等の非 ASCII 約物が `窶・` のような mojibake に化ける。`--output` を使えば Python が直接 UTF-8 でファイルに書き込むためシェルの影響を受けない。
 
 出力は 1 行 1 原文（trim 済み、重複なし、ソート済み）。標準エラーに `[2_extract_texts] unique texts: <N>` が出力される。
 
