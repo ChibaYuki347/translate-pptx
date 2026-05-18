@@ -238,7 +238,7 @@ python ".github/agents/scripts/3_apply_translations.py" temp/unpacked/ temp/tran
 
 1. 列挙された原文を確認する（製品名・URL・略語など意図的に英語のまま残しているものは無視可）。
 2. 真に翻訳されるべきものがあれば、`temp/translations/chunk_NNN.json` に対応エントリを追加（または新規シャードを作成）して再度 `3_apply_translations.py` を実行する。
-3. WARNING が解消するか、残存項目がすべて意図的な原文保持であることを確認してから次工程（クリーニング・パッキング）に進む。
+3. WARNING が解消するか、残存項目がすべて意図的な原文保持であることを確認してから次工程（パッキング）に進む。
 
 ### 7. パッキング
 
