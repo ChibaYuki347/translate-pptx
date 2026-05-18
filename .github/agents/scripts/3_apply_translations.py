@@ -40,10 +40,53 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lib._text_normalize import normalize_text  # noqa: E402
 
 
-EA_TAG = (
-    '<a:ea typeface="Yu Gothic UI" panose="020B0400000000000000" '
-    'pitchFamily="50" charset="-128"/>'
-)
+DEFAULT_EA_FONT = {
+    "typeface": "Yu Gothic UI",
+    "panose": "020B0400000000000000",
+    "pitchFamily": "50",
+    "charset": "-128",
+}
+
+FONT_PRESETS: dict[str, dict[str, str]] = {
+    "yu-gothic-ui": DEFAULT_EA_FONT,
+    "yu-gothic-ui-semibold": {
+        "typeface": "Yu Gothic UI Semibold",
+        "panose": "020B0500000000000000",
+        "pitchFamily": "50",
+        "charset": "-128",
+    },
+    "meiryo": {
+        "typeface": "Meiryo",
+        "panose": "020B0604030504040204",
+        "pitchFamily": "50",
+        "charset": "-128",
+    },
+    "biz-udpgothic": {
+        "typeface": "BIZ UDPGothic",
+        "panose": "020B0400000000000000",
+        "pitchFamily": "50",
+        "charset": "-128",
+    },
+    "noto-sans-jp": {
+        "typeface": "Noto Sans JP",
+        "panose": "020B0500000000000000",
+        "pitchFamily": "50",
+        "charset": "-128",
+    },
+}
+
+
+def build_ea_tag(font: dict[str, str]) -> str:
+    return (
+        f'<a:ea typeface="{font["typeface"]}" panose="{font["panose"]}" '
+        f'pitchFamily="{font["pitchFamily"]}" charset="{font["charset"]}"/>'
+    )
+
+
+# Kept as a module-level default so legacy callers (importing EA_TAG directly)
+# still get a sensible value. Runtime overrides flow through the parameterized
+# `_apply_fonts(content, ea_tag=...)` path.
+EA_TAG = build_ea_tag(DEFAULT_EA_FONT)
 
 TEXT_TARGETS = (
     'ppt/slides/slide*.xml',
@@ -112,7 +155,7 @@ def _replace_text(content: str, translations: dict[str, str]) -> str:
     return _TEXT_RE.sub(repl, content)
 
 
-def _fix_block(m: re.Match) -> str:
+def _fix_block(m: re.Match, ea_tag: str = EA_TAG) -> str:
     block = m.group(0)
     if '<a:ea' in block:
         return block
@@ -121,26 +164,26 @@ def _fix_block(m: re.Match) -> str:
         return block
     tag = tag_match.group(1)
     if _LATIN_RE.search(block):
-        return _LATIN_RE.sub(r'\1' + EA_TAG, block, count=1)
+        return _LATIN_RE.sub(r'\1' + ea_tag, block, count=1)
     self_close = _SELFCLOSE_RE.match(block)
     if self_close:
-        return f'{self_close.group(1)}>{EA_TAG}</a:{tag}>'
+        return f'{self_close.group(1)}>{ea_tag}</a:{tag}>'
     if _ANCHOR_RE.search(block):
-        return _ANCHOR_RE.sub(EA_TAG + r'\1', block, count=1)
-    return re.sub(r'(</a:' + tag + r'>)', EA_TAG + r'\1', block, count=1)
+        return _ANCHOR_RE.sub(ea_tag + r'\1', block, count=1)
+    return re.sub(r'(</a:' + tag + r'>)', ea_tag + r'\1', block, count=1)
 
 
-def _apply_fonts(content: str) -> str:
-    content = _EA_RE.sub(EA_TAG, content)
-    content = _BLOCK_RE.sub(_fix_block, content)
+def _apply_fonts(content: str, ea_tag: str = EA_TAG) -> str:
+    content = _EA_RE.sub(ea_tag, content)
+    content = _BLOCK_RE.sub(lambda m: _fix_block(m, ea_tag), content)
     return content
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
-            "Apply Japanese translations, lang attribute updates, and Yu Gothic "
-            "UI font replacement to an unpacked PPTX directory."
+            "Apply Japanese translations, lang attribute updates, and "
+            "East-Asian font replacement to an unpacked PPTX directory."
         )
     )
     parser.add_argument("unpacked_dir", help="Unpacked PPTX directory")
@@ -158,6 +201,24 @@ def main() -> int:
         action="store_true",
         help="Emit one log line per file processed (debug; very chatty).",
     )
+    parser.add_argument(
+        "--ea-preset",
+        default="yu-gothic-ui",
+        choices=sorted(FONT_PRESETS.keys()),
+        help="East-Asian font preset (default: yu-gothic-ui)",
+    )
+    parser.add_argument(
+        "--ea-font",
+        default=None,
+        help="Override East-Asian typeface name (e.g. 'Meiryo'). Takes precedence over --ea-preset.",
+    )
+    parser.add_argument("--ea-panose", default=None, help="Override panose attribute.")
+    parser.add_argument(
+        "--ea-pitch-family",
+        default=None,
+        help="Override pitchFamily attribute.",
+    )
+    parser.add_argument("--ea-charset", default=None, help="Override charset attribute.")
     args = parser.parse_args()
 
     root, translations_path = args.unpacked_dir, args.translations
@@ -171,6 +232,18 @@ def main() -> int:
             print(msg, file=sys.stderr, flush=True)
 
     t0 = time.monotonic()
+
+    font = dict(FONT_PRESETS[args.ea_preset])
+    if args.ea_font:
+        font["typeface"] = args.ea_font
+    if args.ea_panose:
+        font["panose"] = args.ea_panose
+    if args.ea_pitch_family:
+        font["pitchFamily"] = args.ea_pitch_family
+    if args.ea_charset:
+        font["charset"] = args.ea_charset
+    ea_tag = build_ea_tag(font)
+
     translations: dict[str, str] = {}
     if os.path.isdir(translations_path):
         shards = sorted(glob.glob(os.path.join(translations_path, '*.json')))
@@ -252,7 +325,7 @@ def main() -> int:
     for i, path in enumerate(font_files_sorted, 1):
         with open(path, 'r', encoding='utf-8') as fh:
             content = fh.read()
-        new_content = _apply_fonts(content)
+        new_content = _apply_fonts(content, ea_tag)
         if new_content != content:
             font_changed += 1
         with open(path, 'w', encoding='utf-8') as fh:
@@ -272,7 +345,7 @@ def main() -> int:
 
     print(f"Translation entries: {len(translations)}")
     print(f"Text/lang updated files: {translated_count} (slides: {slides_updated}, notes: {notes_updated})")
-    print(f"Font updated files: {font_changed}")
+    print(f"Font updated files: {font_changed} (typeface: {font['typeface']})")
     log(
         f"[3_apply_translations] Total elapsed: "
         f"{time.monotonic() - t0:.1f}s"
