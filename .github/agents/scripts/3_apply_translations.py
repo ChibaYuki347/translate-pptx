@@ -300,7 +300,61 @@ def _remove_ea_fonts(content: str) -> str:
     return content
 
 
+def _load_allowlist(path: str | None) -> tuple[set[str], list[re.Pattern]]:
+    """Load literal strings and regex patterns from an allowlist file.
+
+    File format:
+      - Lines starting with '#' or empty lines: ignored.
+      - Lines starting with 're:': remainder compiled as a regex.
+      - Other lines: literal match against normalize_text(<a:t>).
+    """
+    literals: set[str] = set()
+    patterns: list[re.Pattern] = []
+    if not path or not os.path.exists(path):
+        return literals, patterns
+    with open(path, 'r', encoding='utf-8') as fh:
+        for raw in fh:
+            line = raw.rstrip('\n')
+            stripped = line.strip()
+            if not stripped or stripped.startswith('#'):
+                continue
+            if stripped.startswith('re:'):
+                try:
+                    patterns.append(re.compile(stripped[3:]))
+                except re.error as exc:
+                    print(
+                        f"[3_apply_translations] WARNING: skipping invalid allowlist regex "
+                        f"{stripped!r}: {exc}",
+                        file=sys.stderr,
+                    )
+                continue
+            literals.add(_normalize_key(stripped))
+    return literals, patterns
+
+
+def _is_allowlisted(
+    text: str,
+    literals: set[str],
+    patterns: list[re.Pattern],
+) -> bool:
+    if not literals and not patterns:
+        return False
+    key = _normalize_key(text)
+    if key in literals:
+        return True
+    for p in patterns:
+        if p.search(text) or p.search(key):
+            return True
+    return False
+
+
 def main() -> int:
+    default_allowlist = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        '..', 'data', 'residual_allowlist.txt',
+    )
+    default_allowlist = os.path.normpath(default_allowlist)
+
     parser = argparse.ArgumentParser(
         description=(
             "Apply translations, lang attribute updates, and font handling to "
@@ -352,6 +406,20 @@ def main() -> int:
         help="Override pitchFamily attribute.",
     )
     parser.add_argument("--ea-charset", default=None, help="Override charset attribute.")
+    parser.add_argument(
+        "--allowlist",
+        default=default_allowlist if os.path.exists(default_allowlist) else None,
+        help=(
+            "Path to allowlist file. Strings/regexes matching the allowlist are "
+            "excluded from the English-residual WARNING. Default: "
+            ".github/agents/data/residual_allowlist.txt if present."
+        ),
+    )
+    parser.add_argument(
+        "--no-allowlist",
+        action="store_true",
+        help="Disable the allowlist (report every English-looking residual run).",
+    )
     args = parser.parse_args()
 
     root, translations_path = args.unpacked_dir, args.translations
@@ -389,6 +457,10 @@ def main() -> int:
 
     t0 = time.monotonic()
     log(f"[3_apply_translations] Direction: {direction} ({font_label})")
+
+    allowlist_path = None if args.no_allowlist else args.allowlist
+    allow_literals, allow_patterns = _load_allowlist(allowlist_path)
+
 
     translations: dict[str, str] = {}
     if os.path.isdir(translations_path):
@@ -506,11 +578,14 @@ def main() -> int:
     #   en2ja: 3+ consecutive ASCII letters AND no CJK -> likely missed English.
     #   ja2en: any CJK character -> likely missed Japanese.
     # Entries already in the dictionary are skipped (intentional pass-through,
-    # e.g. product names like "Microsoft Azure").
+    # e.g. product names like "Microsoft Azure"). Strings/patterns matching
+    # the allowlist are also suppressed (en2ja only; allowlist semantics are
+    # English-residual specific and don't apply to ja2en CJK detection).
     _EN_RUN_RE = re.compile(r'[A-Za-z]{3,}')
     _CJK_RE = re.compile(r'[\u3040-\u30ff\u3400-\u9fff\uff66-\uff9f]')
     residual: list[tuple[str, str]] = []
     norm_dict_keys = {_normalize_key(k) for k in translations}
+    allow_suppressed = 0
     for path in sorted(text_files):
         with open(path, 'r', encoding='utf-8') as fh:
             content = fh.read()
@@ -526,11 +601,20 @@ def main() -> int:
                     continue
                 if not _EN_RUN_RE.search(stripped):
                     continue
+                if _is_allowlisted(stripped, allow_literals, allow_patterns):
+                    allow_suppressed += 1
+                    continue
                 residual.append((os.path.basename(path), stripped))
             else:  # ja2en
                 if not _CJK_RE.search(stripped):
                     continue
                 residual.append((os.path.basename(path), stripped))
+    if direction == 'en2ja' and allowlist_path and (allow_literals or allow_patterns):
+        print(
+            f"[3_apply_translations] Allowlist suppressed {allow_suppressed} "
+            f"residual run(s) (from {allowlist_path})",
+            file=sys.stderr,
+        )
     if residual:
         what = (
             'English-looking text with no CJK characters'
