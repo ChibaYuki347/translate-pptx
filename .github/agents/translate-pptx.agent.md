@@ -129,8 +129,8 @@ XML の `<a:rPr>` 内で以下の属性を設定する:
 - `lang` 属性を `ja-JP` に更新すること（`en-US`、`en-GB` など英語ロケールをすべて置換）
 - 東アジアフォント（`<a:ea>`）をYu Gothic UIに変更すること
 - 常用漢字のみを使用し、中国語の簡体字・繁体字を混入させないこと
-- 作業用のスクリプトや一時ファイルは、ルートフォルダの下に temp フォルダを作成し、その中で作業を実施てください。
-- 作業終了後に temp フォルダを削除してください。
+- 作業用のスクリプトや一時ファイルは、ルートフォルダ直下の `temp/<jobid>/` フォルダ内で作業を実施してください。`<jobid>` は実行ごとに一意な ID（既定: 入力 PPTX の拡張子なしのファイル名をサニタイズしたもの）とし、複数の翻訳ジョブを同時実行しても作業ディレクトリが衝突しないようにします。
+- 作業終了後に `temp/<jobid>/` を削除してください（`temp/` 自体は他のジョブが利用中の可能性があるため削除しません）。
 
 ## ワークフロー (#tool:todo)
 
@@ -142,34 +142,44 @@ XML の `<a:rPr>` 内で以下の属性を設定する:
 |-------------|------|-----------|
 | `source_file` | 翻訳対象の PPTX ファイルパス | （必須） |
 | `output_suffix` | 出力ファイル名に付加するサフィックス | `_JA` |
+| `jobid` | この実行で使用する作業ディレクトリ名 (`temp/<jobid>/`) | 入力 PPTX の拡張子なしファイル名（英数 / `-` / `_` 以外を `_` に置換） |
 
 出力ファイル名は、元のファイル名（拡張子を除く）に `output_suffix` を付加し、`.pptx` 拡張子を付ける。
 
 **二重翻訳ガード:** `source_file` のベース名（拡張子除く）が `_JA` または `_EN` で終わる場合は、翻訳済み出力を再翻訳しようとしていると判断してエラー終了する。`1_unpack_pptx.py` 側でも同じガードが実装されているため、明らかに二重翻訳とわかるケースはスクリプトレベルでも拒否される。意図的に再翻訳したい場合は `1_unpack_pptx.py --force-already-translated` を指定する。
 
+**並列実行ルール:** 複数の PPTX を同時に翻訳する場合は、それぞれ別々の `<jobid>` を割り当てること（例: ファイル A は `jobid=deck_a`、ファイル B は `jobid=deck_b`）。`<jobid>` は **半角英数および `-` `_` のみ** で構成し、空白・スラッシュ・記号を含めないこと。
+
 ### 2. 作業用 temp フォルダの作成
 
-ワークフロー中に生成するスクリプト・展開ファイル・中間生成物は、すべてリポジトリ ルートフォルダ直下の `temp/` フォルダ内で扱う。既存の `temp/` が残っていた場合は事前に削除して作り直す:
+ワークフロー中に生成するスクリプト・展開ファイル・中間生成物は、すべて `temp/<jobid>/` 配下で扱う。既存の同名サブディレクトリが残っていた場合は事前に削除して作り直す（`temp/` 自体は他のジョブが利用中の可能性があるため、`temp/<jobid>/` のみを削除する）:
+
+PowerShell:
 
 **Windows / PowerShell:**
 
 ```powershell
-if (Test-Path temp) { Remove-Item temp -Recurse -Force }
-New-Item -ItemType Directory -Path temp | Out-Null
+$JobId = "<jobid>"
+$WorkDir = "temp/$JobId"
+if (Test-Path $WorkDir) { Remove-Item $WorkDir -Recurse -Force }
+New-Item -ItemType Directory -Path $WorkDir -Force | Out-Null
 ```
 
 **Linux / macOS / WSL (bash):**
 
 ```bash
-rm -rf temp && mkdir -p temp
+JOBID="<jobid>"
+WORKDIR="temp/${JOBID}"
+rm -rf "${WORKDIR}"
+mkdir -p "${WORKDIR}"
 ```
 
-以降の手順 (3〜8) における `unpacked/` や `temp/` などの相対パスはすべて `temp/` 配下を指すものとする（例: `temp/unpacked/`、`temp/translate.py`）。出力先 PPTX (`<output_file>`) は `temp/` の外（ユーザー指定の場所）に書き出すこと。
+以降の手順 (3〜8) における `unpacked/` や `translations/` などの相対パスはすべて `temp/<jobid>/` 配下を指すものとする（例: `temp/<jobid>/unpacked/`、`temp/<jobid>/translations/`）。出力先 PPTX (`<output_file>`) は `temp/` の外（ユーザー指定の場所）に書き出すこと。
 
 ### 3. PPTX の展開
 
 ```bash
-python ".github/agents/scripts/1_unpack_pptx.py" "<source_file>" temp/unpacked/
+python ".github/agents/scripts/1_unpack_pptx.py" "<source_file>" "temp/${JOBID}/unpacked/"
 ```
 
 ### 4. テキストの一覧化
@@ -177,7 +187,7 @@ python ".github/agents/scripts/1_unpack_pptx.py" "<source_file>" temp/unpacked/
 事前配置されたスクリプト `.github/agents/scripts/2_extract_texts.py` を使用して、スライド本文 (`ppt/slides/slide*.xml`) およびノート (`ppt/notesSlides/notesSlide*.xml`) の `<a:t>` テキストを抽出する。**`--unique` オプションを必ず指定**し、重複を除いたユニークな原文だけを取得すること（辞書生成のトークン消費を最小化するため）:
 
 ```bash
-python ".github/agents/scripts/2_extract_texts.py" --unique --output temp/unique_texts.txt temp/unpacked/
+python ".github/agents/scripts/2_extract_texts.py" --unique --output "temp/${JOBID}/unique_texts.txt" "temp/${JOBID}/unpacked/"
 ```
 
 **重要（出力先は必ず `--output` で指定すること）:** シェルのリダイレクト `>` は **絶対に使用しない**。PowerShell の `>` は子プロセスの stdout を `[Console]::OutputEncoding`（日本語 Windows では既定で CP932）として再デコードし、UTF-16 LE + BOM でファイルに書き出すため、`–`（EN DASH, UTF-8: `E2 80 93`）等の非 ASCII 約物が `窶・` のような mojibake に化ける。`--output` を使えば Python が直接 UTF-8 でファイルに書き込むためシェルの影響を受けない。
@@ -195,16 +205,16 @@ python ".github/agents/scripts/2_extract_texts.py" --unique --output temp/unique
 
 ### 5. 翻訳辞書の作成
 
-翻訳辞書は **`temp/translations/` ディレクトリ配下に複数の JSON シャードに分割して生成する**。これは単一の巨大 JSON を 1 回の `Create File` で書き出そうとすると LLM の出力トークン上限に達して処理が完了しないことがあるため、必須の対策である。
+翻訳辞書は **`temp/<jobid>/translations/` ディレクトリ配下に複数の JSON シャードに分割して生成する**。これは単一の巨大 JSON を 1 回の `Create File` で書き出そうとすると LLM の出力トークン上限に達して処理が完了しないことがあるため、必須の対策である。
 
 **分割ルール:**
 
-- ディレクトリ: `temp/translations/`
+- ディレクトリ: `temp/<jobid>/translations/`
 - ファイル名: `chunk_001.json`, `chunk_002.json`, ... （ゼロパディング 3 桁、辞書順マージ）
 - 1 シャードあたり **概ね 50〜100 エントリ** を上限とする。原文・訳文が長い場合はさらに少なくする
 - 各シャードは独立した完全な JSON オブジェクト（`{ "原文": "訳文", ... }`）
 
-例 `temp/translations/chunk_001.json`:
+例 `temp/<jobid>/translations/chunk_001.json`:
 
 ```json
 {
@@ -233,7 +243,7 @@ python ".github/agents/scripts/2_extract_texts.py" --unique --output temp/unique
 3. 東アジアフォント `<a:ea>` を **Yu Gothic UI** に置換／挿入。対象は slides / notesSlides / slideLayouts / slideMasters / notesMasters / theme の全 XML。`<a:ea>` を持たない `<a:rPr>` / `<a:endParaRPr>` / `<a:defRPr>` には OOXML スキーマ準拠の位置（`<a:latin>` の直後、または `<a:hlinkClick>`/`<a:hlinkMouseOver>`/`<a:rtl>`/`<a:extLst>` の前、いずれもなければ閉じタグ直前）に `<a:ea>` を挿入する
 
 ```bash
-python ".github/agents/scripts/3_apply_translations.py" temp/unpacked/ temp/translations/
+python ".github/agents/scripts/3_apply_translations.py" "temp/${JOBID}/unpacked/" "temp/${JOBID}/translations/"
 ```
 
 **翻訳後の英語残存チェック（重要）:**
@@ -247,34 +257,36 @@ python ".github/agents/scripts/3_apply_translations.py" temp/unpacked/ temp/tran
 **WARNING が出た場合の対応（重要）:**
 
 1. 列挙された原文を確認する（製品名・URL・略語など意図的に英語のまま残しているものは無視可）。
-2. 真に翻訳されるべきものがあれば、`temp/translations/chunk_NNN.json` に対応エントリを追加（または新規シャードを作成）して再度 `3_apply_translations.py` を実行する。
+2. 真に翻訳されるべきものがあれば、`temp/<jobid>/translations/chunk_NNN.json` に対応エントリを追加（または新規シャードを作成）して再度 `3_apply_translations.py` を実行する。
 3. WARNING が解消するか、残存項目がすべて意図的な原文保持であることを確認してから次工程（パッキング）に進む。
 
 ### 7. パッキング
 
 ```bash
-python ".github/agents/scripts/4_pack_pptx.py" temp/unpacked/ "<output_file>"
+python ".github/agents/scripts/4_pack_pptx.py" "temp/${JOBID}/unpacked/" "<output_file>"
 ```
 
-**注意:** 出力先 `<output_file>` は `temp/` の外に指定すること（`temp/` 配下に出力するとクリーンアップ時に削除される）。
+**注意:** 出力先 `<output_file>` は `temp/<jobid>/` の外に指定すること（`temp/<jobid>/` 配下に出力するとクリーンアップ時に削除される）。
 
 ### 8. クリーンアップ
 
-作業用 `temp/` フォルダを丸ごと削除する（展開ファイル、翻訳スクリプト、その他の中間生成物がすべて含まれる）:
+作業用 `temp/<jobid>/` フォルダのみを削除する（展開ファイル、翻訳スクリプト、その他の中間生成物がすべて含まれる）。`temp/` 自体は他のジョブが利用中の可能性があるため削除しないこと:
+
+PowerShell:
 
 **Windows / PowerShell:**
 
 ```powershell
-if (Test-Path temp) { Remove-Item temp -Recurse -Force }
+if (Test-Path "temp/$JobId") { Remove-Item "temp/$JobId" -Recurse -Force }
 ```
 
 **Linux / macOS / WSL (bash):**
 
 ```bash
-rm -rf temp
+rm -rf "temp/${JOBID}"
 ```
 
-エラーで中断した場合も、必ず `temp/` を削除してから終了すること。
+エラーで中断した場合も、必ず `temp/<jobid>/` を削除してから終了すること。
 
 ## 出力
 
