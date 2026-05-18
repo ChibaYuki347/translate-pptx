@@ -55,6 +55,18 @@ FONT_TARGETS = (
     'ppt/slideMasters/slideMaster*.xml',
     'ppt/notesMasters/notesMaster*.xml',
     'ppt/theme/theme*.xml',
+    # Containers that also carry <a:rPr><a:ea/></a:rPr> styling fragments and
+    # were previously missed by the FONT_TARGETS scan. Without these globs,
+    # SmartArt nodes (diagrams/*.xml) and presentation-level defaults
+    # (presentation.xml) keep their original East-Asian fonts, leaving stray
+    # MS Mincho / Yu Mincho / Latin substitutes in the rendered slides.
+    'ppt/presentation.xml',
+    'ppt/diagrams/data*.xml',
+    'ppt/diagrams/drawing*.xml',
+    'ppt/diagrams/layout*.xml',
+    'ppt/diagrams/colors*.xml',
+    'ppt/diagrams/quickStyle*.xml',
+    'ppt/charts/chart*.xml',
 )
 
 _LANG_RE = re.compile(r'lang="en-[A-Za-z]+"')
