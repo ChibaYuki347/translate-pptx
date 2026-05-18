@@ -25,12 +25,14 @@ The translations argument may be either:
 """
 from __future__ import annotations
 
+import argparse
 import glob
 import html
 import json
 import os
 import re
 import sys
+import time
 from xml.sax.saxutils import escape as _xml_escape
 
 # Local import (script directory is on sys.path when run as a file).
@@ -123,26 +125,62 @@ def _apply_fonts(content: str) -> str:
 
 
 def main() -> int:
-    if len(sys.argv) != 3:
-        print(__doc__, file=sys.stderr)
-        return 2
-    root, translations_path = sys.argv[1], sys.argv[2]
+    parser = argparse.ArgumentParser(
+        description=(
+            "Apply Japanese translations, lang attribute updates, and Yu Gothic "
+            "UI font replacement to an unpacked PPTX directory."
+        )
+    )
+    parser.add_argument("unpacked_dir", help="Unpacked PPTX directory")
+    parser.add_argument(
+        "translations",
+        help="Translation JSON file or directory of *.json shards",
+    )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Suppress per-shard/per-batch progress lines (final summary still emitted).",
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Emit one log line per file processed (debug; very chatty).",
+    )
+    args = parser.parse_args()
+
+    root, translations_path = args.unpacked_dir, args.translations
+
+    def log(msg: str) -> None:
+        if not args.quiet:
+            print(msg, file=sys.stderr, flush=True)
+
+    def vlog(msg: str) -> None:
+        if args.verbose:
+            print(msg, file=sys.stderr, flush=True)
+
+    t0 = time.monotonic()
     translations: dict[str, str] = {}
     if os.path.isdir(translations_path):
         shards = sorted(glob.glob(os.path.join(translations_path, '*.json')))
         if not shards:
             print(f"No *.json shards found in {translations_path}", file=sys.stderr)
             return 2
-        for shard in shards:
+        for i, shard in enumerate(shards, 1):
             with open(shard, 'r', encoding='utf-8') as fh:
                 data = json.load(fh)
             if not isinstance(data, dict):
                 print(f"Shard {shard} is not a JSON object; skipping", file=sys.stderr)
                 continue
             translations.update(data)
+            log(
+                f"[3_apply_translations] Loaded shard {i}/{len(shards)}: "
+                f"{os.path.basename(shard)} ({len(data)} entries, "
+                f"cumulative {len(translations)})"
+            )
     else:
         with open(translations_path, 'r', encoding='utf-8') as fh:
             translations = json.load(fh)
+        log(f"[3_apply_translations] Loaded single dictionary: {len(translations)} entries")
 
     text_files = set()
     for pattern in TEXT_TARGETS:
@@ -152,9 +190,17 @@ def main() -> int:
     for pattern in FONT_TARGETS:
         font_files.update(glob.glob(os.path.join(root, pattern)))
 
+    text_files_sorted = sorted(text_files)
+    log(
+        f"[3_apply_translations] Applying translations to {len(text_files_sorted)} "
+        f"text files (slides + notes)..."
+    )
+
+    t_text = time.monotonic()
     slides_updated = 0
     notes_updated = 0
-    for path in sorted(text_files):
+    progress_every = max(1, len(text_files_sorted) // 10)
+    for i, path in enumerate(text_files_sorted, 1):
         with open(path, 'r', encoding='utf-8') as fh:
             content = fh.read()
         original = content
@@ -167,11 +213,31 @@ def main() -> int:
                 slides_updated += 1
         with open(path, 'w', encoding='utf-8') as fh:
             fh.write(content)
+        vlog(f"[3_apply_translations]   text {i}/{len(text_files_sorted)}: {os.path.basename(path)}")
+        if i % progress_every == 0:
+            log(
+                f"[3_apply_translations] Text replace progress: "
+                f"{i}/{len(text_files_sorted)} "
+                f"(slides updated={slides_updated}, notes updated={notes_updated})"
+            )
 
     translated_count = slides_updated + notes_updated
+    t_text_done = time.monotonic()
+    log(
+        f"[3_apply_translations] Text/lang replace done in "
+        f"{t_text_done - t_text:.1f}s"
+    )
 
+    font_files_sorted = sorted(font_files)
+    log(
+        f"[3_apply_translations] Applying Yu Gothic UI font to "
+        f"{len(font_files_sorted)} font-target files..."
+    )
+
+    t_font = time.monotonic()
     font_changed = 0
-    for path in sorted(font_files):
+    progress_every_f = max(1, len(font_files_sorted) // 10)
+    for i, path in enumerate(font_files_sorted, 1):
         with open(path, 'r', encoding='utf-8') as fh:
             content = fh.read()
         new_content = _apply_fonts(content)
@@ -179,10 +245,26 @@ def main() -> int:
             font_changed += 1
         with open(path, 'w', encoding='utf-8') as fh:
             fh.write(new_content)
+        vlog(f"[3_apply_translations]   font {i}/{len(font_files_sorted)}: {os.path.basename(path)}")
+        if i % progress_every_f == 0:
+            log(
+                f"[3_apply_translations] Font replace progress: "
+                f"{i}/{len(font_files_sorted)} (changed={font_changed})"
+            )
+
+    t_font_done = time.monotonic()
+    log(
+        f"[3_apply_translations] Font replace done in "
+        f"{t_font_done - t_font:.1f}s"
+    )
 
     print(f"Translation entries: {len(translations)}")
     print(f"Text/lang updated files: {translated_count} (slides: {slides_updated}, notes: {notes_updated})")
     print(f"Font updated files: {font_changed}")
+    log(
+        f"[3_apply_translations] Total elapsed: "
+        f"{time.monotonic() - t0:.1f}s"
+    )
 
     # Final check: surface <a:t> runs that still look like untranslated English
     # so the caller can iterate. Heuristic: contains 3+ consecutive ASCII
