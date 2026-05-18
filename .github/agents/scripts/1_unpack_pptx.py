@@ -25,7 +25,11 @@ SMART_QUOTE_REPLACEMENTS = {
 }
 
 
-def unpack(input_file: str, output_directory: str) -> tuple[None, str]:
+def unpack(
+    input_file: str,
+    output_directory: str,
+    allow_already_translated: bool = False,
+) -> tuple[None, str]:
     input_path = Path(input_file)
     output_path = Path(output_directory)
 
@@ -34,6 +38,13 @@ def unpack(input_file: str, output_directory: str) -> tuple[None, str]:
 
     if input_path.suffix.lower() != ".pptx":
         return None, f"Error: {input_file} must be a .pptx file"
+
+    if not allow_already_translated and input_path.stem.endswith(("_JA", "_EN")):
+        return None, (
+            f"Error: {input_path.name} appears to already be a translation output "
+            f"(suffix '{input_path.stem[-3:]}'). Refusing to translate to avoid "
+            "double translation. Pass --force-already-translated to override."
+        )
 
     try:
         output_path.mkdir(parents=True, exist_ok=True)
@@ -79,9 +90,21 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Unpack a PPTX file for editing")
     parser.add_argument("input_file", help="PPTX file to unpack")
     parser.add_argument("output_directory", help="Output directory")
+    parser.add_argument(
+        "--force-already-translated",
+        action="store_true",
+        help=(
+            "Allow unpacking files whose basename ends with _JA or _EN. "
+            "By default such files are rejected to avoid double translation."
+        ),
+    )
     args = parser.parse_args()
 
-    _, message = unpack(args.input_file, args.output_directory)
+    _, message = unpack(
+        args.input_file,
+        args.output_directory,
+        allow_already_translated=args.force_already_translated,
+    )
     print(message)
 
     if "Error" in message:
