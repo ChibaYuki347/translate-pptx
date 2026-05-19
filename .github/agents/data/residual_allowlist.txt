@@ -1,0 +1,125 @@
+# Allowlist of strings (or regex patterns prefixed with re:) that should NOT be
+# reported by 3_apply_translations.py's English-residual warning check.
+#
+# - Lines starting with '#' or blank are ignored.
+# - Lines starting with 're:' are compiled as Python regular expressions.
+# - Other lines are compared (after normalize_text) against the full <a:t> run.
+#
+# Add organization-specific product names, version strings, and citations here
+# to suppress noise from intentional pass-through text.
+
+# Microsoft / Azure product families (kept verbatim per agent spec)
+Microsoft
+Azure
+Microsoft Azure
+Microsoft 365
+GitHub
+GitHub Enterprise
+GitHub Copilot
+Microsoft Copilot
+Copilot
+Microsoft Fabric
+Microsoft Sentinel
+Microsoft Foundry
+Microsoft Cloud Accelerate Factory
+Defender for Cloud
+Microsoft Defender for Cloud
+Azure VMware Solution
+Azure Arc
+Azure OpenAI
+Azure Kubernetes Service
+Azure Container Apps
+Azure Databricks
+Power BI
+Power Platform
+Dynamics 365
+SharePoint
+Microsoft Teams
+OneDrive
+Visual Studio
+Visual Studio Code
+
+# Common technical abbreviations / acronyms (3+ letters)
+AKS
+ACA
+AVS
+ADO
+AVD
+RBAC
+SDK
+KQL
+WAF
+CSPM
+CWP
+HCX
+ZDM
+SSAS
+SSRS
+NoSQL
+PaaS
+IaaS
+SaaS
+DNS
+HTTP
+HTTPS
+REST
+SOAP
+gRPC
+
+# Common third-party product names (kept verbatim)
+Oracle
+Sybase
+PostgreSQL
+MySQL
+MongoDB
+Cassandra
+Hadoop
+Spark
+Kafka
+Flink
+Snowflake
+Databricks
+Teradata
+Cloudera
+Datadog
+Dynatrace
+New Relic
+GitLab
+Bitbucket
+Confluent
+Solace PubSub
+Solace
+Druid
+
+# Tools / commands
+vMotion
+Datapump
+RMAN
+VMtools
+Ora2PG
+Striim
+Terraform
+Bicep
+PowerShell
+
+# Copyright / disclaimer boilerplate
+re:^©\s*Copyright Microsoft Corporation\b.*$
+re:^©\s*\d{4}\s+Microsoft Corporation.*$
+
+# URLs (kept verbatim)
+re:^https?://\S+$
+re:^aka\.ms/\S+$
+
+# Number + unit (e.g. '30 GiB', '100 Mbps', '99.9%')
+re:^\d+(\.\d+)?\s*(GiB|MiB|KiB|GB|MB|KB|TB|PB|Mbps|Gbps|ms|%|days?|hrs?|hours?|minutes?|seconds?)\s*$
+
+# Range strings (e.g. '500-1000 repository')
+re:^\d{1,4}[\-\u2013]\d{1,4}\s*\S*$
+
+# Version strings
+re:^v?\d+(\.\d+){1,3}([+\-]\S+)?$
+re:^Windows Server \d{4}(\s*R\d)?$
+re:^\.NET( Core| \d+)?$
+
+# Resource provider namespaces (Microsoft.XYZ)
+re:^Microsoft\.\w+(\.\w+)*$

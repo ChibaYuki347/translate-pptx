@@ -1,0 +1,170 @@
+# Keep-as-is list used by 2_extract_texts.py to pre-filter <a:t> runs that are
+# intentionally English (or non-translatable) and should NOT be sent to the LLM
+# for translation.
+#
+# Format:
+#   - Lines starting with '#' or blank are ignored.
+#   - Lines starting with 're:' are compiled as Python regular expressions and
+#     matched with re.fullmatch against the normalized run text.
+#   - Other lines are compared (after normalize_text) for exact equality with
+#     the full normalized <a:t> run text.
+#
+# Notes:
+#   - Only *full-run* matches are skipped. Product names that appear inside a
+#     larger sentence are still extracted (and should be translated).
+#   - This file mirrors the contents of residual_allowlist.txt by convention.
+#     They are kept separate so 2_extract_texts.py and 3_apply_translations.py
+#     can be deployed independently. They may be unified in a future refactor.
+
+# Microsoft / Azure product families (kept verbatim per agent spec)
+Microsoft
+Azure
+Microsoft Azure
+Microsoft 365
+GitHub
+GitHub Enterprise
+GitHub Copilot
+Microsoft Copilot
+Copilot
+Microsoft Fabric
+Microsoft Sentinel
+Microsoft Foundry
+Microsoft Cloud Accelerate Factory
+Defender for Cloud
+Microsoft Defender for Cloud
+Azure VMware Solution
+Azure Arc
+Azure OpenAI
+Azure Kubernetes Service
+Azure Container Apps
+Azure App Service
+Azure Functions
+Azure Logic Apps
+Azure Data Factory
+Azure Synapse Analytics
+Azure DevOps
+Azure Active Directory
+Azure AD
+Entra
+Entra ID
+Microsoft Entra ID
+Microsoft Entra
+Microsoft Graph
+Power BI
+Power Platform
+Power Automate
+Power Apps
+Dynamics 365
+SharePoint
+OneDrive
+Teams
+Microsoft Teams
+Outlook
+Exchange
+Excel
+PowerPoint
+Word
+Visio
+Visual Studio
+Visual Studio Code
+VS Code
+Windows
+Windows Server
+Windows 11
+Windows 10
+SQL Server
+Hyper-V
+PowerShell
+
+# Common third-party product names that appear as-is in marketing/docs
+VMware
+vSphere
+ESXi
+vCenter
+NSX
+vSAN
+Linux
+Red Hat
+Ubuntu
+Oracle
+SAP
+Kubernetes
+Docker
+Terraform
+Bicep
+GitHub Actions
+React
+Node.js
+Python
+Java
+.NET
+ASP.NET
+Spring Boot
+
+# Common 3+ letter acronyms / abbreviations
+SDK
+API
+REST
+HTTP
+HTTPS
+JSON
+XML
+YAML
+SQL
+NoSQL
+DNS
+RBAC
+IAM
+SSO
+MFA
+SaaS
+PaaS
+IaaS
+CI/CD
+DR
+HA
+SLA
+SLO
+SLI
+ITSM
+KPI
+ROI
+PoC
+MVP
+AKS
+ACA
+ACR
+ACI
+ADX
+AVS
+AVD
+HCI
+ARO
+ASR
+ASE
+AGW
+NSG
+VNet
+VPN
+ZTNA
+SOC
+SIEM
+EDR
+XDR
+SASE
+CASB
+DLP
+MDR
+WAF
+
+# Regex patterns
+re:https?://\S+
+re:aka\.ms/\S+
+re:Microsoft\.[A-Za-z][A-Za-z0-9.]*
+re:©\s*Copyright\s+Microsoft\s+Corporation\.?\s+All\s+rights\s+reserved\.?
+re:[Vv]?\d+(?:\.\d+){1,3}
+re:Windows\s+Server\s+\d{4}
+re:\.NET(?:\s+(?:Core|Framework|\d+(?:\.\d+)?))?
+re:\d+(?:\.\d+)?\s*(?:%|TB|GB|MB|KB|GiB|MiB|KiB|ms|s|min|h|hrs?|days?|cores?|vCPUs?|Mbps|Gbps|Kbps|RU/s)
+re:\d{1,3}(?:,\d{3})*(?:\.\d+)?
+re:[\w.+-]+@[\w-]+(?:\.[\w-]+)+
