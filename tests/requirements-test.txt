@@ -1,0 +1,11 @@
+# Test-only requirements for translate-pptx.
+#
+# Install with:
+#     python -m pip install -r tests/requirements-test.txt
+#
+# Production code under .github/agents/scripts/ depends only on the standard
+# library plus defusedxml (see requirements.txt). The packages below are used
+# exclusively by the pytest suite to generate PPTX fixtures and run tests.
+pytest>=7.0
+python-pptx>=0.6.21
+defusedxml>=0.7.1
