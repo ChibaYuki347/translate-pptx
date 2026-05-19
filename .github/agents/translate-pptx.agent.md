@@ -145,13 +145,23 @@ XML の `<a:rPr>` 内で以下の属性を設定する:
 
 出力ファイル名は、元のファイル名（拡張子を除く）に `output_suffix` を付加し、`.pptx` 拡張子を付ける。
 
+**二重翻訳ガード:** `source_file` のベース名（拡張子除く）が `_JA` または `_EN` で終わる場合は、翻訳済み出力を再翻訳しようとしていると判断してエラー終了する。`1_unpack_pptx.py` 側でも同じガードが実装されているため、明らかに二重翻訳とわかるケースはスクリプトレベルでも拒否される。意図的に再翻訳したい場合は `1_unpack_pptx.py --force-already-translated` を指定する。
+
 ### 2. 作業用 temp フォルダの作成
 
 ワークフロー中に生成するスクリプト・展開ファイル・中間生成物は、すべてリポジトリ ルートフォルダ直下の `temp/` フォルダ内で扱う。既存の `temp/` が残っていた場合は事前に削除して作り直す:
 
+**Windows / PowerShell:**
+
 ```powershell
 if (Test-Path temp) { Remove-Item temp -Recurse -Force }
 New-Item -ItemType Directory -Path temp | Out-Null
+```
+
+**Linux / macOS / WSL (bash):**
+
+```bash
+rm -rf temp && mkdir -p temp
 ```
 
 以降の手順 (3〜8) における `unpacked/` や `temp/` などの相対パスはすべて `temp/` 配下を指すものとする（例: `temp/unpacked/`、`temp/translate.py`）。出力先 PPTX (`<output_file>`) は `temp/` の外（ユーザー指定の場所）に書き出すこと。
@@ -252,8 +262,16 @@ python ".github/agents/scripts/4_pack_pptx.py" temp/unpacked/ "<output_file>"
 
 作業用 `temp/` フォルダを丸ごと削除する（展開ファイル、翻訳スクリプト、その他の中間生成物がすべて含まれる）:
 
+**Windows / PowerShell:**
+
 ```powershell
 if (Test-Path temp) { Remove-Item temp -Recurse -Force }
+```
+
+**Linux / macOS / WSL (bash):**
+
+```bash
+rm -rf temp
 ```
 
 エラーで中断した場合も、必ず `temp/` を削除してから終了すること。
