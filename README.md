@@ -25,10 +25,18 @@ pip install -r requirements.txt
 ## 使い方
 
 1. 翻訳対象 PPTX を [pptx/](pptx/) フォルダに配置
-2. GitHub Copilot の Agent モード `Autopilot` で `/PPTX翻訳依頼` プロンプトを起動
+2. GitHub Copilot の Agent モード `Autopilot` で方向に応じたプロンプトを起動
+
+**英 → 日 (en2ja):**
 
 ```text
 /PPTX翻訳依頼
+```
+
+**日 → 英 (ja2en):**
+
+```text
+/PPTX-Translation-Request
 ```
 
 ## 動作イメージ
@@ -68,7 +76,8 @@ translate-pptx/
 │   │           ├── __init__.py
 │   │           └── _text_normalize.py        # 共通の文字正規化処理
 │   └── prompts/
-│       └── PPTX翻訳依頼.prompt.md             # エージェント起動プロンプト
+│       ├── PPTX翻訳依頼.prompt.md              # 英 → 日 起動プロンプト (en2ja)
+│       └── PPTX-Translation-Request.prompt.md  # 日 → 英 起動プロンプト (ja2en)
 ├── pptx/                                     # 翻訳対象 PPTX を配置（ここに翻訳結果も出力）
 └── README.md
 ```
