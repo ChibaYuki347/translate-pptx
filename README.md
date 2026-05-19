@@ -1,6 +1,9 @@
 # translate-pptx
 
-PPTX ファイル（PowerPoint プレゼンテーション）を英語から日本語へ翻訳する GitHub Copilot エージェント。元のレイアウト・書式・画像・図形・色をそのまま保ち、自然な日本語に翻訳して `_JA` サフィックス付きの新しい PPTX ファイルを出力
+PPTX ファイル（PowerPoint プレゼンテーション）を **英語 ⇄ 日本語** で双方向に翻訳する GitHub Copilot エージェント。元のレイアウト・書式・画像・図形・色をそのまま保ち、翻訳後の表示で違和感が出ないよう各方向に合わせたフォント整形まで自動で行う:
+
+- **en2ja（既定）**: 英語 PPTX → 日本語 PPTX。`_JA` サフィックス。東アジアフォントを **Yu Gothic UI** に統一
+- **ja2en**: 日本語 PPTX → 英語 PPTX。`_EN` サフィックス。東アジアフォントを除去し、ラテンフォントを **Segoe UI / Segoe UI Semibold** に統一（見出しが PowerPoint 既定の Calibri Light にフォールバックすることを防止）
 
 ## 前提条件
 
@@ -30,19 +33,23 @@ pip install -r requirements.txt
 
 ## 動作イメージ
 
-プロンプトが `pptx/` 配下の対象ファイルを列挙し、1 ファイルずつ順番にエージェント翻訳を実行。翻訳が完了すると逐次 `pptx/<元ファイル名>_JA.pptx` が生成され、最後に出力ファイル一覧が報告される
+`pptx/` 配下の対象ファイルを列挙し、1 ファイルずつ順番にエージェント翻訳を実行。翻訳が完了すると逐次 `pptx/<元ファイル名>_JA.pptx`（または `_EN.pptx`）が生成され、最後に出力ファイル一覧が報告される
 
 ![動作イメージ](snapshot.png)
 
 ## 特長
 
+- **双方向翻訳**: en2ja（英→日）と ja2en（日→英）を同一エージェントで実行
 - **レイアウト保持**: スライドの配置、書式、画像、図形、文字色は変更しない
 - **本文 + ノート翻訳**: スライド本文 (`ppt/slides/`) に加え、発表者ノート (`ppt/notesSlides/`) も翻訳
-- **常用漢字の厳守**: 文化庁告示の常用漢字表（2,136 字）のみを使用
-- **中国語字形の混入防止**: 簡体字・繁体字を排除し、日本語の正字を使用
-- **フォント統一**: slides / notesSlides / slideLayouts / slideMasters / notesMasters / theme の全ファイルで東アジアフォント (`<a:ea>`) を **Yu Gothic UI** に統一
-- **ロケール更新**: `lang="en-*"` を `lang="ja-JP"` に自動更新
+- **方向別フォント整形**:
+  - en2ja: slides / notesSlides / slideLayouts / slideMasters / notesMasters / theme の全 XML で東アジアフォント (`<a:ea>`) を **Yu Gothic UI** に統一
+  - ja2en: 上記すべてから `<a:ea>` を除去し、ラテンフォント (`<a:latin>`) と theme `<a:majorFont>` / `<a:minorFont>` を **Segoe UI / Segoe UI Semibold** に書き換え。太字 (`b="1"`) や見出しは Semibold、本文は Regular に振り分け
+- **常用漢字の厳守（en2ja のみ）**: 文化庁告示の常用漢字表（2,136 字）のみを使用
+- **中国語字形の混入防止（en2ja のみ）**: 簡体字・繁体字を排除し、日本語の正字を使用
+- **ロケール更新**: en2ja は `lang="en-*"` → `lang="ja-JP"`、ja2en は `lang="ja-*"` → `lang="en-US"`
 - **シャード分割翻訳辞書**: 翻訳辞書を `temp/translations/chunk_NNN.json` に分割し、LLM の出力トークン上限による途中切れを回避
+- **二重翻訳ガード**: en2ja は `_JA` / `_EN` サフィックス入力を、ja2en は `_EN` サフィックス入力を拒否（`_JA` 入力は ja2en の正規入力として許可）
 - **シリアル実行**: ファイル間は並列処理せず、1 ファイルずつ確実に処理
 
 ## 主要フォルダ構成
@@ -113,7 +120,8 @@ translate-pptx/
 - スライドのレイアウト・書式・画像・図形・文字色は変更しない
 - XML の構造（タグ、属性、名前空間）は維持
 - 翻訳対象は `<a:t>` タグ内のテキストのみ（本文 + ノート）
-- `<a:latin>` / `<a:cs>` は変更しません（英数字部分の見た目を保持）
-- `<a:ea>` 挿入は OOXML スキーマ順序を厳守（誤ると `<a:solidFill>` が無視され文字が白色化する不具合あり）
-- 元ファイルは上書きせず、`_JA` サフィックスを付けた新規ファイルとして保存
+- en2ja: `<a:latin>` / `<a:cs>` は変更しない（英数字部分の見た目を保持）
+- en2ja: `<a:ea>` 挿入は OOXML スキーマ順序を厳守（誤ると `<a:solidFill>` が無視され文字が白色化する不具合あり）
+- ja2en: `<a:ea>` を全 XML から除去し、`<a:latin>` を Segoe UI 系で明示指定（theme 含む）。見出し相当（`b="1"` または既存 typeface に "Bold"/"Semibold"/"Black"/"Heavy" を含む）は Segoe UI Semibold、本文は Segoe UI に振り分け
+- 元ファイルは上書きせず、`_JA` / `_EN` サフィックスを付けた新規ファイルとして保存
 - 作業用中間ファイルはすべて `temp/` 配下で扱い、終了時に削除

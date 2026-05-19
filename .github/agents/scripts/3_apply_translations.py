@@ -45,6 +45,20 @@ EA_TAG = (
     'pitchFamily="50" charset="-128"/>'
 )
 
+# Latin font tags applied on the ja2en path. PowerPoint's default latin font
+# is Calibri Light; when titles inherit no explicit <a:latin> after a
+# Japanese -> English translation, they render in Calibri Light, which is
+# inconsistent with the Microsoft brand. Force Segoe UI everywhere, with
+# Segoe UI Semibold for bold runs and major (heading) font scheme.
+LATIN_SEGOE_UI = (
+    '<a:latin typeface="Segoe UI" panose="020B0502040204020203" '
+    'pitchFamily="34" charset="0"/>'
+)
+LATIN_SEGOE_UI_SEMIBOLD = (
+    '<a:latin typeface="Segoe UI Semibold" panose="020B0502040204020203" '
+    'pitchFamily="34" charset="0"/>'
+)
+
 TEXT_TARGETS = (
     'ppt/slides/slide*.xml',
     'ppt/notesSlides/notesSlide*.xml',
@@ -72,16 +86,28 @@ FONT_TARGETS = (
 )
 
 _LANG_RE = re.compile(r'lang="en-[A-Za-z]+"')
+_LANG_RE_EN = _LANG_RE
+_LANG_RE_JA = re.compile(r'lang="ja-[A-Za-z]+"')
 _TEXT_RE = re.compile(r'<a:t>(.*?)</a:t>', re.DOTALL)
 _EA_RE = re.compile(r'<a:ea\b[^/>]*/>')
+# Same shape as _EA_RE; ja2en uses it to strip rather than replace.
+_EA_REMOVE_RE = _EA_RE
 _BLOCK_RE = re.compile(
     r'<a:(rPr|endParaRPr|defRPr)\b[^>]*?/>'
     r'|<a:(rPr|endParaRPr|defRPr)\b[^>]*?>.*?</a:\2>',
     re.DOTALL,
 )
 _LATIN_RE = re.compile(r'(<a:latin\b[^/>]*/>)')
+# Non-capturing variant for substitution (replacement without backref).
+_LATIN_REPLACE_RE = re.compile(r'<a:latin\b[^/>]*/>')
 _SELFCLOSE_RE = re.compile(r'(<a:(?:rPr|endParaRPr|defRPr)\b[^>]*?)/>$')
 _ANCHOR_RE = re.compile(r'(<a:(?:hlinkClick|hlinkMouseOver|rtl|extLst)\b)')
+# Anchor for ja2en latin insertion. Per OOXML schema, <a:latin> precedes
+# <a:cs>, <a:sym>, <a:hlink*>, <a:rtl>, <a:extLst>. <a:ea> is stripped
+# before this anchor is consulted.
+_LATIN_ANCHOR_RE = re.compile(
+    r'(<a:(?:cs|sym|hlinkClick|hlinkMouseOver|rtl|extLst)\b)'
+)
 
 
 def _normalize_key(s: str) -> str:
@@ -136,17 +162,124 @@ def _apply_fonts(content: str) -> str:
     return content
 
 
+def _is_bold_block(block: str) -> bool:
+    """Detect whether the rPr-style block represents bold text.
+
+    Bold can be indicated either by the explicit b="1" attribute on the
+    rPr/endParaRPr/defRPr element, or by an existing <a:latin> typeface
+    whose name embeds Bold / Semibold / Black / Heavy.
+    """
+    if re.search(r'\bb="1"', block):
+        return True
+    m = re.search(r'<a:latin\b[^>]*\btypeface="([^"]+)"', block)
+    if m:
+        typeface = m.group(1).lower()
+        if any(kw in typeface for kw in ('bold', 'black', 'heavy')):
+            return True
+    return False
+
+
+def _apply_segoe_latin_block(m: re.Match) -> str:
+    """ja2en helper: for an rPr-style block, set <a:latin> to Segoe UI
+    (Semibold variant when the block represents bold text).
+
+    - Replaces an existing <a:latin> tag in place.
+    - Inserts <a:latin> when the block has explicit b="1" but no <a:latin>;
+      this is critical for title placeholders that otherwise fall back to
+      PowerPoint's default Calibri Light after the <a:ea> strip.
+    - Leaves runs without bold and without explicit <a:latin> untouched
+      so they continue to inherit from layout / theme font scheme.
+    """
+    block = m.group(0)
+    has_b = bool(re.search(r'\bb="1"', block))
+    latin_tag = LATIN_SEGOE_UI_SEMIBOLD if _is_bold_block(block) else LATIN_SEGOE_UI
+
+    if _LATIN_REPLACE_RE.search(block):
+        return _LATIN_REPLACE_RE.sub(latin_tag, block, count=1)
+
+    if not has_b:
+        return block
+
+    tag_match = re.match(r'<a:(\w+)', block)
+    if not tag_match:
+        return block
+    tag = tag_match.group(1)
+    self_close = _SELFCLOSE_RE.match(block)
+    if self_close:
+        return f'{self_close.group(1)}>{latin_tag}</a:{tag}>'
+    if _LATIN_ANCHOR_RE.search(block):
+        return _LATIN_ANCHOR_RE.sub(latin_tag + r'\1', block, count=1)
+    return re.sub(r'(</a:' + tag + r'>)', latin_tag + r'\1', block, count=1)
+
+
+def _replace_theme_latin(content: str, font_tag: str, latin_tag: str) -> str:
+    """Replace (or insert) <a:latin> inside <a:{font_tag}>...</a:{font_tag}>.
+
+    font_tag is 'majorFont' (theme heading font, mapped to Segoe UI Semibold)
+    or 'minorFont' (theme body font, mapped to Segoe UI).
+    """
+    pattern = re.compile(
+        rf'(<a:{font_tag}\b[^>]*>)(.*?)(</a:{font_tag}>)',
+        re.DOTALL,
+    )
+
+    def repl(match: re.Match) -> str:
+        opening, inner, closing = match.group(1), match.group(2), match.group(3)
+        new_inner, count = _LATIN_REPLACE_RE.subn(latin_tag, inner, count=1)
+        if count == 0:
+            new_inner = latin_tag + inner
+        return opening + new_inner + closing
+
+    return pattern.sub(repl, content)
+
+
+def _remove_ea_fonts(content: str) -> str:
+    """ja2en path: strip <a:ea> tags AND force Latin font to Segoe UI.
+
+    Without setting Latin explicitly, JA -> EN-translated titles fall back to
+    PowerPoint's default (Calibri Light) because the East-Asian font tag is
+    removed but no Latin font is set on inherited title placeholders. This
+    function applies Segoe UI to body runs and Segoe UI Semibold to bold
+    runs / the theme major (heading) font scheme.
+
+    Steps:
+      1. Strip all <a:ea/> self-closing tags throughout the document.
+      2. For each <a:rPr>/<a:endParaRPr>/<a:defRPr> block, replace existing
+         <a:latin> (or insert when b="1") with the appropriate Segoe UI
+         variant.
+      3. For theme font scheme: <a:majorFont> Latin -> Segoe UI Semibold;
+         <a:minorFont> Latin -> Segoe UI.
+    """
+    content = _EA_REMOVE_RE.sub('', content)
+    content = _BLOCK_RE.sub(_apply_segoe_latin_block, content)
+    content = _replace_theme_latin(content, 'majorFont', LATIN_SEGOE_UI_SEMIBOLD)
+    content = _replace_theme_latin(content, 'minorFont', LATIN_SEGOE_UI)
+    return content
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
-            "Apply Japanese translations, lang attribute updates, and Yu Gothic "
-            "UI font replacement to an unpacked PPTX directory."
+            "Apply translations, lang attribute updates, and font handling to "
+            "an unpacked PPTX directory. Supports bidirectional translation "
+            "via --direction."
         )
     )
     parser.add_argument("unpacked_dir", help="Unpacked PPTX directory")
     parser.add_argument(
         "translations",
         help="Translation JSON file or directory of *.json shards",
+    )
+    parser.add_argument(
+        "--direction",
+        choices=("en2ja", "ja2en"),
+        default="en2ja",
+        help=(
+            "Translation direction. en2ja (default): rewrite lang to ja-JP "
+            "and apply Yu Gothic UI East-Asian font. ja2en: rewrite lang to "
+            "en-US, strip <a:ea>, and force Latin font to Segoe UI / Segoe "
+            "UI Semibold so titles don't fall back to Calibri Light."
+        ),
     )
     parser.add_argument(
         "--quiet",
@@ -161,6 +294,18 @@ def main() -> int:
     args = parser.parse_args()
 
     root, translations_path = args.unpacked_dir, args.translations
+    direction = args.direction
+
+    if direction == "en2ja":
+        lang_pattern = _LANG_RE_EN
+        lang_replacement = 'lang="ja-JP"'
+        apply_fonts_fn = _apply_fonts
+        font_label = "Yu Gothic UI East-Asian"
+    else:  # ja2en
+        lang_pattern = _LANG_RE_JA
+        lang_replacement = 'lang="en-US"'
+        apply_fonts_fn = _remove_ea_fonts
+        font_label = "Segoe UI Latin (Semibold for bold/major)"
 
     def log(msg: str) -> None:
         if not args.quiet:
@@ -171,6 +316,7 @@ def main() -> int:
             print(msg, file=sys.stderr, flush=True)
 
     t0 = time.monotonic()
+    log(f"[3_apply_translations] Direction: {direction} ({font_label})")
     translations: dict[str, str] = {}
     if os.path.isdir(translations_path):
         shards = sorted(glob.glob(os.path.join(translations_path, '*.json')))
@@ -217,7 +363,7 @@ def main() -> int:
             content = fh.read()
         original = content
         content = _replace_text(content, translations)
-        content = _LANG_RE.sub('lang="ja-JP"', content)
+        content = lang_pattern.sub(lang_replacement, content)
         if content != original:
             if 'notesSlides' in path.replace('\\', '/'):
                 notes_updated += 1
@@ -242,7 +388,7 @@ def main() -> int:
 
     font_files_sorted = sorted(font_files)
     log(
-        f"[3_apply_translations] Applying Yu Gothic UI font to "
+        f"[3_apply_translations] Applying font handling ({font_label}) to "
         f"{len(font_files_sorted)} font-target files..."
     )
 
@@ -252,7 +398,7 @@ def main() -> int:
     for i, path in enumerate(font_files_sorted, 1):
         with open(path, 'r', encoding='utf-8') as fh:
             content = fh.read()
-        new_content = _apply_fonts(content)
+        new_content = apply_fonts_fn(content)
         if new_content != content:
             font_changed += 1
         with open(path, 'w', encoding='utf-8') as fh:
@@ -270,6 +416,7 @@ def main() -> int:
         f"{t_font_done - t_font:.1f}s"
     )
 
+    print(f"Direction: {direction}")
     print(f"Translation entries: {len(translations)}")
     print(f"Text/lang updated files: {translated_count} (slides: {slides_updated}, notes: {notes_updated})")
     print(f"Font updated files: {font_changed}")
@@ -278,12 +425,16 @@ def main() -> int:
         f"{time.monotonic() - t0:.1f}s"
     )
 
-    # Final check: surface <a:t> runs that still look like untranslated English
-    # so the caller can iterate. Heuristic: contains 3+ consecutive ASCII
-    # letters AND no CJK character (Hiragana/Katakana/CJK Unified Ideographs).
+    # Final check: surface <a:t> runs that still look untranslated so the
+    # caller can iterate. Heuristic is direction-aware:
+    #   en2ja: 3+ consecutive ASCII letters AND no CJK -> likely missed English.
+    #   ja2en: any CJK character -> likely missed Japanese.
+    # Entries already in the dictionary are skipped (intentional pass-through,
+    # e.g. product names like "Microsoft Azure").
     _EN_RUN_RE = re.compile(r'[A-Za-z]{3,}')
     _CJK_RE = re.compile(r'[\u3040-\u30ff\u3400-\u9fff\uff66-\uff9f]')
     residual: list[tuple[str, str]] = []
+    norm_dict_keys = {_normalize_key(k) for k in translations}
     for path in sorted(text_files):
         with open(path, 'r', encoding='utf-8') as fh:
             content = fh.read()
@@ -291,22 +442,29 @@ def main() -> int:
             stripped = t.strip()
             if not stripped:
                 continue
-            if _CJK_RE.search(stripped):
-                continue
-            if not _EN_RUN_RE.search(stripped):
-                continue
-            # Likely-English run with no Japanese characters.
             key = _normalize_key(stripped)
-            if key in {_normalize_key(k) for k in translations}:
-                # Was in dict but unchanged -> dictionary value equals source
-                # (intentional pass-through, e.g. product names). Skip.
+            if key in norm_dict_keys:
                 continue
-            residual.append((os.path.basename(path), stripped))
+            if direction == 'en2ja':
+                if _CJK_RE.search(stripped):
+                    continue
+                if not _EN_RUN_RE.search(stripped):
+                    continue
+                residual.append((os.path.basename(path), stripped))
+            else:  # ja2en
+                if not _CJK_RE.search(stripped):
+                    continue
+                residual.append((os.path.basename(path), stripped))
     if residual:
+        what = (
+            'English-looking text with no CJK characters'
+            if direction == 'en2ja'
+            else 'Japanese-looking text (CJK characters)'
+        )
         print(
-            f"[3_apply_translations] WARNING: {len(residual)} <a:t> run(s) still "
-            "contain English-looking text with no CJK characters. Add them to "
-            "the translation dictionary and re-run, or accept as intentional:",
+            f"[3_apply_translations] WARNING: {len(residual)} <a:t> run(s) "
+            f"still contain {what}. Add them to the translation dictionary "
+            "and re-run, or accept as intentional:",
             file=sys.stderr,
         )
         # Cap printed lines to avoid log explosion; full count is above.
